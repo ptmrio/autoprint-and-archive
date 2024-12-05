@@ -11,3 +11,4 @@ PyYAML==6.0.2
 setuptools==75.6.0
 six==1.17.0
 watchdog==6.0.0
+winotify==1.1.0

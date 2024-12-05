@@ -7,6 +7,6 @@
 default_printer: "ET-3850 Series(Netzwerk)"
 
 patterns:
- - pattern: "V7RE-(?P<year>\\d{4})(?P<month>\\d{2})\\d{2}-\\d+\\.pdf$"
-   destination: "C:\\Users\\gpete\\Downloads\\test\\{year}\\{month}"
-   print: true
+    - pattern: "V7RE-(?P<year>\\d{4})-(?P<month>\\d{2})-\\d+\\.pdf$"
+      destination: "C:\\Users\\gpete\\Downloads\\test\\{year}\\{month}"
+      print: true

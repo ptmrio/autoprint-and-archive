@@ -26,3 +26,8 @@ patterns:
     destination: "C:\\Archive\\{year}\\{month}"
     print: true
 ```
+
+## Build
+```bash
+pyinstaller --noconsole --onefile autoprint-and-archive.py
+```
