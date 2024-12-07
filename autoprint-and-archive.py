@@ -2,6 +2,8 @@ import os
 import sys
 import time
 import re
+import queue
+from threading import Thread
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 import win32print
@@ -14,6 +16,7 @@ import logging
 import tempfile
 from winotify import Notification, audio
 from logging.handlers import RotatingFileHandler
+import shutil
 
 log_file = os.path.join(tempfile.gettempdir(), "filemonitor.log")
 handler = RotatingFileHandler(log_file, maxBytes=100*1024, backupCount=0)
@@ -23,21 +26,25 @@ logging.basicConfig(level=logging.INFO, handlers=[handler])
 
 class FileHandler(FileSystemEventHandler):
     def __init__(self, config, downloads_dir):
-        self.patterns = config['patterns']
+        self.patterns = config.get('patterns', [])
         self.default_printer = config.get('default_printer')
         self.downloads_dir = downloads_dir
-        
-    def notify(self, title: str, message: str, *, success: bool = True) -> None:
-        toast = Notification(
-            app_id="AutoPrint and Archive",
-            title=title,
-            msg=message,
-            duration="short"
-        )
-        toast.set_audio(audio.Default, loop=False)
-        toast.add_actions(label="View Log", launch=log_file)
-        toast.show()
-        
+        self.processing_queue = queue.Queue()
+        self.processing_thread = Thread(target=self._process_queue, daemon=True)
+        self.processing_thread.start()
+
+    def _process_queue(self):
+        while True:
+            try:
+                file_info = self.processing_queue.get()
+                if file_info is None:
+                    break
+                self._process_file(*file_info)
+            except Exception as e:
+                logging.error(f"Error processing queued file: {e}")
+            finally:
+                self.processing_queue.task_done()
+
     def on_created(self, event):
         if event.is_directory:
             return
@@ -55,13 +62,30 @@ class FileHandler(FileSystemEventHandler):
             logging.info(f"No matching pattern found for {filename}")
             return
             
-        self._process_file(event.src_path, matched_pattern[0], matched_pattern[1])
+        self.processing_queue.put((event.src_path, matched_pattern[0], matched_pattern[1]))
+
+    def stop(self):
+        self.processing_queue.put(None)
+        self.processing_thread.join()
+        
+    def notify(self, title: str, message: str, *, success: bool = True) -> None:
+        try:
+            toast = Notification(
+                app_id="AutoPrint and Archive",
+                title=title,
+                msg=message,
+                duration="short"
+            )
+            toast.set_audio(audio.Default, loop=False)
+            toast.add_actions(label="View Log", launch=log_file)
+            toast.show()
+        except Exception as e:
+            logging.error(f"Notification error: {e}")
         
     def is_file_locked(self, filepath: str) -> bool:
         try:
             if not os.path.exists(filepath):
                 return True
-                
             with open(filepath, 'r+b') as f:
                 f.seek(0, os.SEEK_END)
                 f.tell()
@@ -90,18 +114,35 @@ class FileHandler(FileSystemEventHandler):
         
         if pattern.get('print', False):
             printer_name = pattern.get('printer', self.default_printer)
-            logging.info(f"Printing file to {printer_name}")
-            try:
-                if printer_name:
-                    win32print.SetDefaultPrinter(printer_name)
-                win32api.ShellExecute(0, "print", file_path, None, ".", 0)
-                self.notify("Print Job Started", f"Printing {filename} to {printer_name}")
-                time.sleep(10)
-                self._wait_for_print(filename)
-            except Exception as e:
-                error_msg = f"Print error for {filename}: {e}"
-                logging.error(error_msg)
-                self.notify("Print Error", error_msg, success=False)
+            if printer_name:
+                original_printer = win32print.GetDefaultPrinter()
+                printer_changed = False
+                # Only change printer if different from the current default
+                if original_printer.lower() != printer_name.lower():
+                    try:
+                        win32print.SetDefaultPrinter(printer_name)
+                        printer_changed = True
+                    except Exception as e:
+                        logging.error(f"Could not set printer {printer_name}: {e}")
+
+                try:
+                    win32api.ShellExecute(0, "print", file_path, None, ".", 0)
+                    self.notify("Print Job Started", f"Printing {filename} to {printer_name}")
+                    time.sleep(10)
+                    self._wait_for_print(filename)
+                except Exception as e:
+                    error_msg = f"Print error for {filename}: {e}"
+                    logging.error(error_msg)
+                    self.notify("Print Error", error_msg, success=False)
+                finally:
+                    if printer_changed:
+                        # Restore original printer
+                        try:
+                            win32print.SetDefaultPrinter(original_printer)
+                        except Exception as e:
+                            logging.error(f"Could not restore original printer {original_printer}: {e}")
+            else:
+                logging.info("No printer specified, skipping printing.")
         
         if os.path.exists(dest_path):
             msg = f"File already exists at destination: {dest_path}"
@@ -122,7 +163,14 @@ class FileHandler(FileSystemEventHandler):
         
         while True:
             current_jobs_count = 0
-            for printer in win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL):
+            # If printers fail, just break after timeout
+            try:
+                printers = win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL)
+            except Exception as e:
+                logging.debug(f"Error enumerating printers: {e}")
+                break
+                
+            for printer in printers:
                 try:
                     jobs = win32print.EnumJobs(printer[2], 0, -1)
                     current_jobs_count += len(jobs)
@@ -134,14 +182,14 @@ class FileHandler(FileSystemEventHandler):
                             stable_count = 0
                             break
                 except Exception as e:
-                    logging.debug(f"Printer error: {e}")
+                    logging.debug(f"Printer job enumeration error: {e}")
                     
             if current_jobs_count == last_jobs_count:
                 stable_count += 1
             else:
                 stable_count = 0
                 
-            if stable_count >= 3 or time.time() - start_time > 60:
+            if stable_count >= 3 or time.time() - start_time > 15:
                 break
                 
             last_jobs_count = current_jobs_count
@@ -154,7 +202,7 @@ class FileHandler(FileSystemEventHandler):
         retries = 3
         while retries > 0:
             try:
-                os.rename(file_path, dest_path)
+                shutil.move(file_path, dest_path)
                 success_msg = f"Moved {os.path.basename(file_path)} to {destination}"
                 logging.info(success_msg)
                 self.notify("File Moved", success_msg)
@@ -175,25 +223,34 @@ class FileMonitor:
         self.running = True
         
     def create_icon(self):
-        image = Image.new('RGB', (64, 64), color='white')
-        self.icon = pystray.Icon(
-            "AutoPrintandArchive",
-            image,
-            "AutoPrint and Archive",
-            menu=pystray.Menu(
-                pystray.MenuItem("Open Log", self.open_log),
-                pystray.MenuItem("Exit", self.stop_monitoring)
+        try:
+            image = Image.new('RGB', (64, 64), color='white')
+            self.icon = pystray.Icon(
+                "AutoPrintandArchive",
+                image,
+                "AutoPrint and Archive",
+                menu=pystray.Menu(
+                    pystray.MenuItem("Open Log", self.open_log),
+                    pystray.MenuItem("Exit", self.stop_monitoring)
+                )
             )
-        )
+        except Exception as e:
+            logging.error(f"Error creating system tray icon: {e}")
+            self.icon = None
     
     def open_log(self):
-        os.startfile(log_file)
+        try:
+            os.startfile(log_file)
+        except Exception as e:
+            logging.error(f"Cannot open log file: {e}")
     
     def stop_monitoring(self):
         self.running = False
         if self.observer:
             self.observer.stop()
-        self.icon.stop()
+            self.observer.join()
+        if self.icon:
+            self.icon.stop()
     
     def start_monitoring(self):
         exe_dir = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, 'frozen', False) else __file__))
@@ -201,8 +258,12 @@ class FileMonitor:
         downloads_dir = os.path.expanduser("~/Downloads")
         
         try:
-            with open(config_path, 'r') as f:
-                config = yaml.safe_load(f)
+            if os.path.exists(config_path):
+                with open(config_path, 'r') as f:
+                    config = yaml.safe_load(f)
+            else:
+                logging.error("Config file not found. Monitoring not started.")
+                return
                 
             logging.info(f"Monitoring: {downloads_dir}")
             logging.info(f"Default printer: {config.get('default_printer', 'Not set')}")
@@ -213,12 +274,26 @@ class FileMonitor:
             self.observer.start()
             
             self.create_icon()
-            self.icon.run()
+            
+            # Run icon only if successfully created
+            if self.icon:
+                try:
+                    self.icon.run()
+                except Exception as e:
+                    logging.error(f"System tray icon error: {e}")
+                    # Even if icon fails, keep monitoring
+                    while self.running:
+                        time.sleep(1)
+            else:
+                # If no icon, just keep running
+                while self.running:
+                    time.sleep(1)
             
         except Exception as e:
             logging.error(f"Error: {e}")
             if self.observer:
                 self.observer.stop()
+                self.observer.join()
             sys.exit(1)
 
 def main():
