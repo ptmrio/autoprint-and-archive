@@ -259,7 +259,7 @@ class FileMonitor:
         
         try:
             if os.path.exists(config_path):
-                with open(config_path, 'r') as f:
+                with open(config_path, 'r', encoding='utf-8') as f:
                     config = yaml.safe_load(f)
             else:
                 logging.error("Config file not found. Monitoring not started.")
