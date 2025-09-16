@@ -1,0 +1,18 @@
+{
+    "print_document_title": "Dokument drucken?",
+    "print_document_message": "Datei erfolgreich archiviert:\n{filename}\n\nMöchten Sie dieses Dokument jetzt drucken?",
+    "file_archived": "Datei archiviert",
+    "file_archived_without_printing": "Datei archiviert ohne Druck: {filename}",
+    "file_already_exists": "Datei bereits vorhanden",
+    "file_already_exists_message": "Datei existiert bereits am Zielort: {dest_path}",
+    "file_processing_error": "Dateiverarbeitungsfehler",
+    "file_locked_error": "Datei {filepath} ist nach 5 Sekunden gesperrt",
+    "print_job_started": "Druckauftrag gestartet",
+    "printing_to": "Drucke {filename} auf {printer}",
+    "print_error": "Druckfehler",
+    "print_error_message": "Druckfehler für {filename}: {error}",
+    "moved_to": "{filename} nach {destination} verschoben",
+    "move_error": "Verschiebungsfehler",
+    "move_error_message": "Fehler beim Verschieben von {filename} nach 3 Versuchen: {error}",
+    "view_log": "Log anzeigen"
+}

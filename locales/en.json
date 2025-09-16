@@ -1,0 +1,18 @@
+{
+    "print_document_title": "Print Document?",
+    "print_document_message": "File archived successfully:\n{filename}\n\nWould you like to print this document now?",
+    "file_archived": "File Archived",
+    "file_archived_without_printing": "File archived without printing: {filename}",
+    "file_already_exists": "File Already Exists",
+    "file_already_exists_message": "File already exists at destination: {dest_path}",
+    "file_processing_error": "File Processing Error",
+    "file_locked_error": "File {filepath} is locked after 5 seconds",
+    "print_job_started": "Print Job Started",
+    "printing_to": "Printing {filename} to {printer}",
+    "print_error": "Print Error",
+    "print_error_message": "Print error for {filename}: {error}",
+    "moved_to": "Moved {filename} to {destination}",
+    "move_error": "Move Error",
+    "move_error_message": "Failed to move {filename} after 3 attempts: {error}",
+    "view_log": "View Log"
+}

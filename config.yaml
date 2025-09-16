@@ -5,8 +5,10 @@
 #   printer: "HP LaserJet"
 
 default_printer: "ET-3850 Series(Netzwerk)"
+language: "de" # Language for user interface: "en" for English, "de" for German
+# dedupe_ttl_seconds: 60 # optional setting to prevent duplicate processing of files within the given time window, defaults to 30 seconds if not set
 
 patterns:
     - pattern: "V7RE-(?P<year>\\d{4})-(?P<month>\\d{2})-\\d+\\.pdf$"
       destination: "C:\\Users\\gpete\\Downloads\\test\\{year}\\{month}"
-      print: true
+      print: prompt # true to always print, false to never print, prompt to ask every time
